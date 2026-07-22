@@ -1,0 +1,44 @@
+[
+  {
+    "id": "12345",
+    "name": "Fight.Club.1999.1080p.BluRay.x264",
+    "info_hash": "ABCDEF0123456789ABCDEF0123456789ABCDEF01",
+    "leechers": "3",
+    "seeders": "42",
+    "num_files": "1",
+    "size": "8589934592",
+    "username": "anon",
+    "added": "1609459200",
+    "status": "vip",
+    "category": "207",
+    "imdb": "tt0137523"
+  },
+  {
+    "id": "12346",
+    "name": "Fight.Club.1999.720p.WEB-DL",
+    "info_hash": "FEDCBA9876543210FEDCBA9876543210FEDCBA98",
+    "leechers": 8,
+    "seeders": 15,
+    "num_files": 2,
+    "size": 4294967296,
+    "username": "uploader",
+    "added": 1609545600,
+    "status": "member",
+    "category": "201",
+    "imdb": "tt0137523"
+  },
+  {
+    "id": "0",
+    "name": "No results returned",
+    "info_hash": "0000000000000000000000000000000000000000",
+    "leechers": "0",
+    "seeders": "0",
+    "num_files": "0",
+    "size": "0",
+    "username": "",
+    "added": "0",
+    "status": "",
+    "category": "0",
+    "imdb": ""
+  }
+]
