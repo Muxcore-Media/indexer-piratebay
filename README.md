@@ -5,17 +5,17 @@
 
 **Single-site MuxCore indexer for The Pirate Bay**, implementing `contracts-indexer` `IndexerService` via an Apibay-compatible JSON search API.
 
-Advertises capability `indexer` so `media-automation` can discover and fan out searches to this module alongside others.
+Advertises capabilities `indexer`, `indexer.piratebay`, and `settings` so `media-automation` can discover and fan out searches, and operators can set the API base at runtime.
 
 ---
 
 ## Network safety
 
 - **CI and unit tests never call public Pirate Bay / Apibay mirrors.** They use hand-written fixtures and `httptest`.
-- Live HTTP is used **only** when `PIRATEBAY_API_BASE` is set to a non-empty Apibay-compatible base URL.
+- Live HTTP is used **only** when an Apibay-compatible base URL is configured (`PIRATEBAY_API_BASE` or admin setting `base_url`).
 - With an empty base URL, `Search` returns no results and `ListIndexers` reports `configured=false`.
 
-Operators should set `PIRATEBAY_API_BASE` only when they have appropriate network access (e.g. VPN). Example shape (not used by CI): `https://apibay.org`.
+Operators should configure a base URL only when they have appropriate network access (e.g. VPN). Example shape (not used by CI): `https://apibay.org`.
 
 ---
 
@@ -26,7 +26,13 @@ Operators should set `PIRATEBAY_API_BASE` only when they have appropriate networ
 | `PIRATEBAY_GRPC_ADDR` | `:9480` | gRPC listen address (registered as `HTTPAddr` for discovery) |
 | `PIRATEBAY_API_BASE` | _(empty)_ | Apibay-compatible API base; required for live search |
 | `MUXCORE_GRPC_ADDR` | — | Core mesh address |
-| `MUXCORE_GRPC_INSECURE` | `false` | Disable TLS for local core |
+| `MUXCORE_INSECURE_DISABLE_TLS` | `false` | Disable TLS for local core |
+
+### Admin settings
+
+| Key | Description |
+|-----|-------------|
+| `base_url` | Apibay-compatible API base (same role as `PIRATEBAY_API_BASE`; updates the live client) |
 
 ---
 
@@ -34,7 +40,7 @@ Operators should set `PIRATEBAY_API_BASE` only when they have appropriate networ
 
 ```bash
 make build
-export MUXCORE_GRPC_INSECURE=true
+export MUXCORE_INSECURE_DISABLE_TLS=true
 # Leave PIRATEBAY_API_BASE unset until you intentionally enable a mirror:
 ./indexer-piratebay --muxcore-mesh-addr localhost:9090
 ```
@@ -43,8 +49,8 @@ export MUXCORE_GRPC_INSECURE=true
 
 ## gRPC (`IndexerService`)
 
-- `Search` — query Apibay `/q.php` when configured; maps hits to magnets (`info_hash`)
-- `GetCapabilities` — movie/tv/audio torrent search
+- `Search` — query Apibay `/q.php` when configured; maps hits to magnets (`info_hash`); rate-limited with retry/backoff
+- `GetCapabilities` — torrent search across movie/tv/audio/ebook/app/game and related categories
 - `ListIndexers` — single entry `The Pirate Bay`
 
 ---

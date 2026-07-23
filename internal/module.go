@@ -87,7 +87,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 		Roles:        []string{"indexer"},
 		Description:  "Single-site The Pirate Bay indexer via Apibay-compatible JSON API",
 		Author:       "MuxCore",
-		Capabilities: []string{"indexer"},
+		Capabilities: []string{"indexer", "indexer.piratebay", "settings"},
 		Contracts: []contracts.ContractDeclaration{
 			{Repo: "github.com/Muxcore-Media/contracts-indexer", Interface: "Indexer", Version: "v1"},
 		},
@@ -116,6 +116,7 @@ func (m *Module) Init(ctx context.Context) error {
 func (m *Module) Start(ctx context.Context) error {
 	m.grpcSrv = grpc.NewServer()
 	indexerv1.RegisterIndexerServiceServer(m.grpcSrv, m)
+	m.registerSettingsMesh(m.grpcSrv)
 	go func() {
 		slog.Info("indexer-piratebay gRPC started", "addr", m.grpcAddr)
 		if err := m.grpcSrv.Serve(m.lis); err != nil {
@@ -173,11 +174,14 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 
 func (m *Module) GetCapabilities(ctx context.Context, _ *indexerv1.GetCapabilitiesRequest) (*indexerv1.GetCapabilitiesResponse, error) {
 	return &indexerv1.GetCapabilitiesResponse{
-		SupportsSearch:         true,
-		SupportsMovieSearch:    true,
-		SupportsTvSearch:       true,
-		SupportedCategories:    []string{"movie", "tv", "audio", "video"},
-		SupportedProtocols:     []string{"torrent"},
+		SupportsSearch:      true,
+		SupportsMovieSearch: true,
+		SupportsTvSearch:    true,
+		SupportedCategories: []string{
+			"movie", "hd-movie", "tv", "hd-tv", "audio", "flac", "audiobook",
+			"video", "ebook", "comics", "application", "game", "xxx", "other",
+		},
+		SupportedProtocols: []string{"torrent"},
 	}, nil
 }
 
