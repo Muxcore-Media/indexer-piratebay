@@ -16,20 +16,52 @@ const (
 	indexerID   = int32(1)
 )
 
+// Apibay top-level category codes (partial tree used by search).
+// 100 Audio, 101 Music, 102 Audio books, 103 Sound clips, 104 FLAC, 199 Other
+// 200 Video, 201 Movies, 202 Movies DVDR, 203 Music videos, 204 Movie clips,
+// 205 TV shows, 206 Handheld, 207 HD Movies, 208 HD TV, 209 3D, 299 Other
+// 300 Applications, 301 Windows, 302 Mac, 303 UNIX, 304 Handheld, 305 iOS, 306 Android, 399 Other
+// 400 Games, 401 PC, 402 Mac, 403 PSx, 404 XBOX360, 405 Wii, 406 Handheld, 407 iOS, 408 Android, 499 Other
+// 500 Porn, 501 Movies, 502 Movies DVDR, 503 Pictures, 504 Games, 505 HD Movies, 506 Movie clips, 599 Other
+// 600 Other, 601 E-books, 602 Comics, 603 Pictures, 604 Covers, 605 Physibles, 699 Other
+
 // categoryForSearch maps IndexerService search type / categories to Apibay cat codes.
-// 0 = all. Common: 200=Video, 201=Movies, 205=TV, 100=Audio.
+// 0 = all.
 func categoryForSearch(searchType string, categories []string) int {
 	for _, c := range categories {
 		c = strings.ToLower(strings.TrimSpace(c))
+		if n, err := strconv.Atoi(c); err == nil && n >= 0 {
+			return n
+		}
 		switch c {
-		case "movie", "movies", "201":
+		case "movie", "movies":
 			return 201
-		case "tv", "television", "205":
+		case "hd-movie", "hd_movie", "hdmovies":
+			return 207
+		case "tv", "television", "tvshows", "tv-shows":
 			return 205
-		case "audio", "music", "100":
+		case "hd-tv", "hd_tv", "hdtv":
+			return 208
+		case "audio", "music":
 			return 100
-		case "video", "200":
+		case "flac":
+			return 104
+		case "audiobook", "audiobooks", "audio-book":
+			return 102
+		case "video":
 			return 200
+		case "ebook", "ebooks", "e-book", "books", "book":
+			return 601
+		case "comics", "comic":
+			return 602
+		case "application", "applications", "apps", "app":
+			return 300
+		case "game", "games", "pc-games":
+			return 400
+		case "xxx", "porn":
+			return 500
+		case "other":
+			return 600
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(searchType)) {
@@ -39,6 +71,8 @@ func categoryForSearch(searchType string, categories []string) int {
 		return 205
 	case "audio", "music":
 		return 100
+	case "book", "ebook":
+		return 601
 	default:
 		return 0
 	}
@@ -50,16 +84,44 @@ func categoryLabel(cat flexString) (category, sub string) {
 	case n >= 200 && n < 300:
 		category = "video"
 		switch n {
-		case 201:
+		case 201, 202, 207, 209:
 			sub = "movies"
-		case 205:
+		case 205, 208:
 			sub = "tv"
+		case 203:
+			sub = "music-videos"
 		default:
 			sub = "other"
 		}
 	case n >= 100 && n < 200:
 		category = "audio"
-		sub = "music"
+		switch n {
+		case 102:
+			sub = "audiobooks"
+		case 104:
+			sub = "flac"
+		default:
+			sub = "music"
+		}
+	case n >= 300 && n < 400:
+		category = "applications"
+		sub = "other"
+	case n >= 400 && n < 500:
+		category = "games"
+		sub = "other"
+	case n >= 500 && n < 600:
+		category = "xxx"
+		sub = "other"
+	case n >= 600 && n < 700:
+		category = "other"
+		switch n {
+		case 601:
+			sub = "ebooks"
+		case 602:
+			sub = "comics"
+		default:
+			sub = "other"
+		}
 	default:
 		category = strconv.Itoa(n)
 	}

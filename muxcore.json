@@ -3,8 +3,14 @@
   "description": "Single-site indexer module for The Pirate Bay via an Apibay-compatible JSON API.",
   "version": "0.1.0",
   "author": "MuxCore",
-  "roles": ["indexer"],
-  "capabilities": ["indexer", "indexer.piratebay"],
+  "roles": [
+    "indexer"
+  ],
+  "capabilities": [
+    "indexer",
+    "indexer.piratebay",
+    "settings"
+  ],
   "contracts": [
     {
       "repo": "github.com/Muxcore-Media/contracts-indexer",

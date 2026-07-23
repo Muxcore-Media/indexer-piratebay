@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -78,8 +79,12 @@ func bytesTrimSpace(b []byte) []byte {
 // apibayClient talks to an Apibay-compatible base URL.
 // If baseURL is empty, Search returns nil without making any HTTP request.
 type apibayClient struct {
-	baseURL string
-	http    *http.Client
+	baseURL    string
+	http       *http.Client
+	mu         sync.Mutex
+	lastCall   time.Time
+	minInterval time.Duration
+	maxRetries int
 }
 
 func newApibayClient(baseURL string, hc *http.Client) *apibayClient {
@@ -87,11 +92,39 @@ func newApibayClient(baseURL string, hc *http.Client) *apibayClient {
 	if hc == nil {
 		hc = &http.Client{Timeout: 20 * time.Second}
 	}
-	return &apibayClient{baseURL: baseURL, http: hc}
+	return &apibayClient{
+		baseURL:     baseURL,
+		http:        hc,
+		minInterval: 500 * time.Millisecond,
+		maxRetries:  3,
+	}
 }
 
 func (c *apibayClient) configured() bool {
 	return c != nil && c.baseURL != ""
+}
+
+func (c *apibayClient) waitRate(ctx context.Context) error {
+	c.mu.Lock()
+	wait := c.minInterval - time.Since(c.lastCall)
+	c.mu.Unlock()
+	if wait <= 0 {
+		return nil
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func (c *apibayClient) markCall() {
+	c.mu.Lock()
+	c.lastCall = time.Now()
+	c.mu.Unlock()
 }
 
 func (c *apibayClient) Search(ctx context.Context, query string, cat int) ([]apibayHit, error) {
@@ -107,25 +140,65 @@ func (c *apibayClient) Search(ctx context.Context, query string, cat int) ([]api
 	q.Set("cat", strconv.Itoa(cat))
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
+	var lastErr error
+	backoff := 500 * time.Millisecond
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if err := c.waitRate(ctx); err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("apibay search: %w", err)
+		c.markCall()
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("apibay search: %w", err)
+			if attempt == c.maxRetries {
+				break
+			}
+			if err := sleepBackoff(ctx, backoff); err != nil {
+				return nil, err
+			}
+			backoff *= 2
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read body: %w", readErr)
+		}
+		switch {
+		case resp.StatusCode == http.StatusOK:
+			return parseApibayHits(body)
+		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+			lastErr = fmt.Errorf("apibay status %d: %s", resp.StatusCode, truncate(string(body), 200))
+			if attempt == c.maxRetries {
+				break
+			}
+			if err := sleepBackoff(ctx, backoff); err != nil {
+				return nil, err
+			}
+			backoff *= 2
+			continue
+		default:
+			return nil, fmt.Errorf("apibay status %d: %s", resp.StatusCode, truncate(string(body), 200))
+		}
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
+	return nil, lastErr
+}
+
+func sleepBackoff(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("apibay status %d: %s", resp.StatusCode, truncate(string(body), 200))
-	}
-	return parseApibayHits(body)
 }
 
 func parseApibayHits(body []byte) ([]apibayHit, error) {
