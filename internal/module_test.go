@@ -242,7 +242,7 @@ func TestModuleInfo(t *testing.T) {
 	if len(info.Capabilities) == 0 || info.Capabilities[0] != "indexer" {
 		t.Errorf("capabilities: %v", info.Capabilities)
 	}
-	if info.HTTPAddr != ":9480" {
+	if info.HTTPAddr != ":9485" {
 		t.Errorf("HTTPAddr: %s", info.HTTPAddr)
 	}
 }
