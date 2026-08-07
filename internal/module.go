@@ -44,7 +44,7 @@ func NewModule(cfg Config) *Module {
 		cfg.ID = "indexer-piratebay"
 	}
 	if cfg.GRPCAddr == "" {
-		cfg.GRPCAddr = ":9480"
+		cfg.GRPCAddr = ":9485"
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 20 * time.Second
