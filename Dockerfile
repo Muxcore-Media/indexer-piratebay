@@ -7,5 +7,5 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /build/module ./cmd/module
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /build/module /
-EXPOSE 9485
+EXPOSE 9480
 ENTRYPOINT ["/module"]
