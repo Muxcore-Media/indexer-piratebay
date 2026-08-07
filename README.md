@@ -23,7 +23,7 @@ Operators should configure a base URL only when they have appropriate network ac
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PIRATEBAY_GRPC_ADDR` | `:9480` | gRPC listen address (registered as `HTTPAddr` for discovery) |
+| `PIRATEBAY_GRPC_ADDR` | `:9485` | gRPC listen address (registered as `HTTPAddr` for discovery) |
 | `PIRATEBAY_API_BASE` | _(empty)_ | Apibay-compatible API base; required for live search |
 | `MUXCORE_GRPC_ADDR` | — | Core mesh address |
 | `MUXCORE_INSECURE_DISABLE_TLS` | `false` | Disable TLS for local core |
