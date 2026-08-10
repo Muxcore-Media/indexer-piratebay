@@ -142,7 +142,7 @@ func TestMapHitsLimitOffset(t *testing.T) {
 		{ID: "2", Name: "B", InfoHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		{ID: "3", Name: "C", InfoHash: "cccccccccccccccccccccccccccccccccccccccc"},
 	}
-	out := mapHits(hits, "", 1, 1)
+	out := mapHits(pageHits(hits, 1, 1), "")
 	if len(out) != 1 || out[0].Guid != "2" {
 		t.Fatalf("got %+v", out)
 	}
@@ -244,5 +244,143 @@ func TestModuleInfo(t *testing.T) {
 	}
 	if info.HTTPAddr != ":9485" {
 		t.Errorf("HTTPAddr: %s", info.HTTPAddr)
+	}
+}
+
+func TestParseApibayDetailFixture(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "detail_sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := parseApibayDetail(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h == nil || h.ID.String() != "12345" {
+		t.Fatalf("hit: %+v", h)
+	}
+	if h.Seeders.Int() != 99 {
+		t.Errorf("seeders: %d", h.Seeders.Int())
+	}
+	if !strings.Contains(h.Descr, "NFO") {
+		t.Errorf("descr: %q", h.Descr)
+	}
+}
+
+func TestMergeDetail(t *testing.T) {
+	base := apibayHit{
+		ID: "12345", Name: "A", InfoHash: "aa", Seeders: "10", IMDB: "",
+	}
+	detail := &apibayHit{
+		ID: "12345", Name: "A", InfoHash: "aa", Seeders: "99", IMDB: "0137523", Descr: "nfo",
+	}
+	got := mergeDetail(base, detail)
+	if got.Seeders.Int() != 99 || got.IMDB != "0137523" || got.Descr != "nfo" {
+		t.Fatalf("merged: %+v", got)
+	}
+}
+
+func TestSearchEnrichDetailsOffByDefault(t *testing.T) {
+	searchBody, err := os.ReadFile(filepath.Join("testdata", "search_sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detailHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "t.php") {
+			detailHits++
+		}
+		_, _ = w.Write(searchBody)
+	}))
+	t.Cleanup(srv.Close)
+
+	m := NewModule(Config{
+		GRPCAddr:  ":0",
+		BaseURL:   srv.URL,
+		HTTP:      srv.Client(),
+		EnrichSet: true,
+		Enrich:    false,
+	})
+	ctx := context.Background()
+	if err := m.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Stop(ctx) })
+
+	resp, err := m.Search(ctx, &indexerv1.SearchRequest{Query: "Fight Club", Type: "movie", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Results) != 2 {
+		t.Fatalf("results=%d", len(resp.Results))
+	}
+	if detailHits != 0 {
+		t.Fatalf("detail calls=%d want 0 when enrich off", detailHits)
+	}
+	if resp.Results[0].Seeders != 42 {
+		t.Errorf("seeders=%d want search value 42", resp.Results[0].Seeders)
+	}
+}
+
+func TestSearchEnrichDetailsOn(t *testing.T) {
+	searchBody, err := os.ReadFile(filepath.Join("testdata", "search_sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	detailBody, err := os.ReadFile(filepath.Join("testdata", "detail_sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detailHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/t.php"):
+			detailHits++
+			_, _ = w.Write(detailBody)
+		default:
+			_, _ = w.Write(searchBody)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	m := NewModule(Config{
+		GRPCAddr:    ":0",
+		BaseURL:     srv.URL,
+		HTTP:        srv.Client(),
+		EnrichSet:   true,
+		Enrich:      true,
+		EnrichLimit: 1,
+	})
+	if c, ok := m.api.(*apibayClient); ok {
+		c.minInterval = 0
+		c.maxRetries = 0
+	}
+	ctx := context.Background()
+	if err := m.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Stop(ctx) })
+
+	resp, err := m.Search(ctx, &indexerv1.SearchRequest{Query: "Fight Club", Type: "movie", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detailHits != 1 {
+		t.Fatalf("detail calls=%d want 1 (enrich_limit=1)", detailHits)
+	}
+	if resp.Results[0].Seeders != 99 {
+		t.Errorf("enriched seeders=%d want 99", resp.Results[0].Seeders)
+	}
+	if !strings.Contains(resp.Results[0].InfoUrl, "t.php?id=") {
+		t.Errorf("info_url=%q want t.php when descr present", resp.Results[0].InfoUrl)
+	}
+	if resp.Results[1].Seeders != 15 {
+		t.Errorf("second hit should stay unenriched seeders=%d", resp.Results[1].Seeders)
 	}
 }
