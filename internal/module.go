@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,23 +21,28 @@ import (
 type Module struct {
 	indexerv1.UnimplementedIndexerServiceServer
 
-	mu       sync.RWMutex
-	api      searchAPI
-	baseURL  string
-	id       string
-	grpcAddr string
-	grpcSrv  *grpc.Server
-	lis      net.Listener
-	http     *http.Client
+	mu          sync.RWMutex
+	api         searchAPI
+	baseURL     string
+	id          string
+	grpcAddr    string
+	grpcSrv     *grpc.Server
+	lis         net.Listener
+	http        *http.Client
+	enrich      bool
+	enrichLimit int
 }
 
 type Config struct {
-	ID       string
-	GRPCAddr string
-	BaseURL  string
-	Timeout  time.Duration
-	HTTP     *http.Client // optional; for tests inject httptest transport
-	API      searchAPI    // optional; overrides Apibay client when set
+	ID          string
+	GRPCAddr    string
+	BaseURL     string
+	Timeout     time.Duration
+	HTTP        *http.Client // optional; for tests inject httptest transport
+	API         searchAPI    // optional; overrides Apibay client when set
+	Enrich      bool         // optional; when set, overrides env default
+	EnrichSet   bool         // true if Enrich was explicitly provided
+	EnrichLimit int          // max hits to enrich (0 → default 5)
 }
 
 func NewModule(cfg Config) *Module {
@@ -61,22 +67,52 @@ func NewModule(cfg Config) *Module {
 	}
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 
+	enrich := false
+	if cfg.EnrichSet {
+		enrich = cfg.Enrich
+	} else if v := os.Getenv("PIRATEBAY_ENRICH_DETAILS"); v != "" {
+		enrich = envTruthy(v)
+	}
+	enrichLimit := cfg.EnrichLimit
+	if enrichLimit <= 0 {
+		enrichLimit = 5
+		if v := os.Getenv("PIRATEBAY_ENRICH_LIMIT"); v != "" {
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+				enrichLimit = n
+			}
+		}
+	}
+	if enrichLimit > 25 {
+		enrichLimit = 25
+	}
+
 	hc := cfg.HTTP
 	if hc == nil {
 		hc = &http.Client{Timeout: cfg.Timeout}
 	}
 
 	m := &Module{
-		id:       cfg.ID,
-		grpcAddr: cfg.GRPCAddr,
-		baseURL:  cfg.BaseURL,
-		http:     hc,
-		api:      cfg.API,
+		id:          cfg.ID,
+		grpcAddr:    cfg.GRPCAddr,
+		baseURL:     cfg.BaseURL,
+		http:        hc,
+		api:         cfg.API,
+		enrich:      enrich,
+		enrichLimit: enrichLimit,
 	}
 	if m.api == nil {
 		m.api = newApibayClient(m.baseURL, hc)
 	}
 	return m
+}
+
+func envTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Module) Info() contracts.ModuleInfo {
@@ -109,6 +145,8 @@ func (m *Module) Init(ctx context.Context) error {
 	slog.Info("indexer-piratebay initialized",
 		"grpc", m.grpcAddr,
 		"configured", m.baseURL != "",
+		"enrich_details", m.enrich,
+		"enrich_limit", m.enrichLimit,
 	)
 	return nil
 }
@@ -165,11 +203,45 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 		slog.Warn("indexer-piratebay search failed", "error", err)
 		return nil, fmt.Errorf("search: %w", err)
 	}
-	results := mapHits(hits, base, int(req.GetOffset()), int(req.GetLimit()))
+	page := pageHits(hits, int(req.GetOffset()), int(req.GetLimit()))
+	m.mu.RLock()
+	enrich := m.enrich
+	enrichLimit := m.enrichLimit
+	m.mu.RUnlock()
+	if enrich {
+		page = m.enrichHits(ctx, api, page, enrichLimit)
+	}
+	results := mapHits(page, base)
 	return &indexerv1.SearchResponse{
 		Results: results,
 		Total:   int32(len(results)),
 	}, nil
+}
+
+func (m *Module) enrichHits(ctx context.Context, api searchAPI, hits []apibayHit, limit int) []apibayHit {
+	detail, ok := api.(detailAPI)
+	if !ok || limit <= 0 || len(hits) == 0 {
+		return hits
+	}
+	n := limit
+	if n > len(hits) {
+		n = len(hits)
+	}
+	out := make([]apibayHit, len(hits))
+	copy(out, hits)
+	for i := 0; i < n; i++ {
+		id := hits[i].ID.String()
+		d, err := detail.Detail(ctx, id)
+		if err != nil {
+			slog.Debug("indexer-piratebay detail enrich skipped", "id", id, "error", err)
+			continue
+		}
+		if d == nil {
+			continue
+		}
+		out[i] = mergeDetail(hits[i], d)
+	}
+	return out
 }
 
 func (m *Module) GetCapabilities(ctx context.Context, _ *indexerv1.GetCapabilitiesRequest) (*indexerv1.GetCapabilitiesResponse, error) {

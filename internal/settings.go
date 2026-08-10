@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Muxcore-Media/core/pkg/contracts"
@@ -12,7 +13,13 @@ import (
 func (m *Module) settingsDefs() []contracts.SettingDef {
 	m.mu.RLock()
 	base := m.baseURL
+	enrich := m.enrich
+	limit := m.enrichLimit
 	m.mu.RUnlock()
+	enrichVal := "false"
+	if enrich {
+		enrichVal = "true"
+	}
 	return []contracts.SettingDef{
 		{
 			Key:         "base_url",
@@ -24,6 +31,26 @@ func (m *Module) settingsDefs() []contracts.SettingDef {
 			Required:    false,
 			Group:       "Connection",
 		},
+		{
+			Key:         "enrich_details",
+			Label:       "Enrich search with torrent details",
+			Type:        contracts.SettingTypeBool,
+			Default:     "false",
+			Value:       enrichVal,
+			Description: "When true, fetch Apibay /t.php for the top hits (fresher seeders/size/imdb + NFO snippet). Off by default (extra upstream calls).",
+			Required:    false,
+			Group:       "Search",
+		},
+		{
+			Key:         "enrich_limit",
+			Label:       "Detail enrichment limit",
+			Type:        contracts.SettingTypeInt,
+			Default:     "5",
+			Value:       fmt.Sprintf("%d", limit),
+			Description: "Max search hits to enrich via /t.php (1–25). Ignored when enrich_details is false.",
+			Required:    false,
+			Group:       "Search",
+		},
 	}
 }
 
@@ -34,6 +61,23 @@ func (m *Module) updateSetting(key, value string) error {
 		m.mu.Lock()
 		m.baseURL = value
 		m.api = newApibayClient(m.baseURL, m.http)
+		m.mu.Unlock()
+		return nil
+	case "enrich_details", "PIRATEBAY_ENRICH_DETAILS":
+		m.mu.Lock()
+		m.enrich = envTruthy(value)
+		m.mu.Unlock()
+		return nil
+	case "enrich_limit", "PIRATEBAY_ENRICH_LIMIT":
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 1 {
+			return fmt.Errorf("enrich_limit must be a positive integer")
+		}
+		if n > 25 {
+			n = 25
+		}
+		m.mu.Lock()
+		m.enrichLimit = n
 		m.mu.Unlock()
 		return nil
 	default:
