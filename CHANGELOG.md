@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Optional torrent detail enrichment via Apibay `/t.php` (`PIRATEBAY_ENRICH_DETAILS=1`, settings `enrich_details` / `enrich_limit`; off by default). Refreshes seeders/peers/size/imdb and points `info_url` at `/t.php` when a description is present.
+
 ## v0.1.0
 
 - Initial release: `IndexerService` for The Pirate Bay via Apibay-compatible JSON
