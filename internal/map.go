@@ -135,7 +135,12 @@ func hitToSearchResult(h apibayHit, apiBase string) *indexerv1.SearchResult {
 
 	infoURL := ""
 	if apiBase != "" && h.ID.String() != "" {
-		infoURL = strings.TrimRight(apiBase, "/") + "/t/" + url.PathEscape(h.ID.String())
+			// When detail enrich ran, point InfoUrl at /t.php (JSON includes descr/NFO).
+		if strings.TrimSpace(h.Descr) != "" {
+			infoURL = strings.TrimRight(apiBase, "/") + "/t.php?id=" + url.QueryEscape(h.ID.String())
+		} else {
+			infoURL = strings.TrimRight(apiBase, "/") + "/t/" + url.PathEscape(h.ID.String())
+		}
 	}
 
 	cat, sub := categoryLabel(h.Category)
@@ -167,7 +172,7 @@ func hitToSearchResult(h apibayHit, apiBase string) *indexerv1.SearchResult {
 	}
 }
 
-func mapHits(hits []apibayHit, apiBase string, offset, limit int) []*indexerv1.SearchResult {
+func pageHits(hits []apibayHit, offset, limit int) []apibayHit {
 	if offset < 0 {
 		offset = 0
 	}
@@ -184,6 +189,10 @@ func mapHits(hits []apibayHit, apiBase string, offset, limit int) []*indexerv1.S
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
+	return hits
+}
+
+func mapHits(hits []apibayHit, apiBase string) []*indexerv1.SearchResult {
 	out := make([]*indexerv1.SearchResult, 0, len(hits))
 	for _, h := range hits {
 		out = append(out, hitToSearchResult(h, apiBase))

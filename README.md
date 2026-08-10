@@ -25,6 +25,8 @@ Operators should configure a base URL only when they have appropriate network ac
 |----------|---------|-------------|
 | `PIRATEBAY_GRPC_ADDR` | `:9485` | gRPC listen address (registered as `HTTPAddr` for discovery) |
 | `PIRATEBAY_API_BASE` | _(empty)_ | Apibay-compatible API base; required for live search |
+| `PIRATEBAY_ENRICH_DETAILS` | `false` | When `1`/`true`, fetch `/t.php` for top search hits (extra upstream calls) |
+| `PIRATEBAY_ENRICH_LIMIT` | `5` | Max hits to enrich (capped at 25) |
 | `MUXCORE_GRPC_ADDR` | — | Core mesh address |
 | `MUXCORE_INSECURE_DISABLE_TLS` | `false` | Disable TLS for local core |
 
@@ -33,6 +35,8 @@ Operators should configure a base URL only when they have appropriate network ac
 | Key | Description |
 |-----|-------------|
 | `base_url` | Apibay-compatible API base (same role as `PIRATEBAY_API_BASE`; updates the live client) |
+| `enrich_details` | Opt-in detail enrichment (default off) |
+| `enrich_limit` | How many paged hits to enrich via `/t.php` |
 
 ---
 
@@ -49,7 +53,7 @@ export MUXCORE_INSECURE_DISABLE_TLS=true
 
 ## gRPC (`IndexerService`)
 
-- `Search` — query Apibay `/q.php` when configured; maps hits to magnets (`info_hash`); rate-limited with retry/backoff
+- `Search` — query Apibay `/q.php` when configured; maps hits to magnets (`info_hash`); rate-limited with retry/backoff. Optional `/t.php` enrichment refreshes seeders/size/imdb (off by default).
 - `GetCapabilities` — torrent search across movie/tv/audio/ebook/app/game and related categories
 - `ListIndexers` — single entry `The Pirate Bay`
 
