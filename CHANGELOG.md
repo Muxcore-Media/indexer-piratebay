@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Live Apibay HTTP source-bound to WireGuard iface from `WG_CONF` (`SO_BINDTODEVICE`); refuse live base without VPN
+- `INDEXER_FIXTURE=1` embedded search fixtures for offline caps/search; capability discovery without live Apibay
+
 ## v0.1.2 (2026-08-09)
 
 - Optional torrent detail enrichment via Apibay `/t.php` (`PIRATEBAY_ENRICH_DETAILS=1`, settings `enrich_details` / `enrich_limit`; off by default). Refreshes seeders/peers/size/imdb and points `info_url` at `/t.php` when a description is present.

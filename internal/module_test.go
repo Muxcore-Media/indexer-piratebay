@@ -216,6 +216,36 @@ func TestSearchViaHTTPtest(t *testing.T) {
 		t.Errorf("download_url: %s", resp.Results[0].DownloadUrl)
 	}
 
+	var gotQuery string
+	srvYear := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query().Get("q")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srvYear.Close)
+	mYear := NewModule(Config{
+		GRPCAddr: ":0",
+		BaseURL:  srvYear.URL,
+		HTTP:     srvYear.Client(),
+	})
+	if err := mYear.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := mYear.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mYear.Stop(ctx) })
+	if _, err := mYear.Search(ctx, &indexerv1.SearchRequest{
+		Query: "Fight Club",
+		Type:  "movie",
+		Year:  1999,
+		Limit: 10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "Fight Club 1999" {
+		t.Errorf("movie year should be appended to query, got %q", gotQuery)
+	}
+
 	caps, err := m.GetCapabilities(ctx, &indexerv1.GetCapabilitiesRequest{})
 	if err != nil {
 		t.Fatal(err)

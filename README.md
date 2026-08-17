@@ -12,10 +12,12 @@ Advertises capabilities `indexer`, `indexer.piratebay`, and `settings` so `media
 ## Network safety
 
 - **CI and unit tests never call public Pirate Bay / Apibay mirrors.** They use hand-written fixtures and `httptest`.
-- Live HTTP is used **only** when an Apibay-compatible base URL is configured (`PIRATEBAY_API_BASE` or admin setting `base_url`).
-- With an empty base URL, `Search` returns no results and `ListIndexers` reports `configured=false`.
+- Offline smoke: set `INDEXER_FIXTURE=1` (host runner clears `PIRATEBAY_API_BASE`). Search returns embedded sample hits; no HTTP.
+- Live HTTP is used **only** when an Apibay-compatible base URL is configured (`PIRATEBAY_API_BASE` or admin setting `base_url`) **and** a readable `WG_CONF` is present.
+- Live HTTP is **source-bound** to the WireGuard interface derived from `WG_CONF` (same policy as `downloader-native-torrent`: `SO_BINDTODEVICE` + tunnel `LocalAddr`). There is no clearnet fallback.
+- With an empty base URL and fixture off, `Search` returns no results and `ListIndexers` reports `configured=false`. `GetCapabilities` / module `indexer` capability still work for admin and automation discovery.
 
-Operators should configure a base URL only when they have appropriate network access (e.g. VPN). Example shape (not used by CI): `https://apibay.org`.
+Operators should configure a base URL only when Proton WireGuard is up (`./scripts/check-vpn-up.sh` on gringotts). Example shape (not used by CI): `https://apibay.org`.
 
 ---
 
@@ -24,7 +26,9 @@ Operators should configure a base URL only when they have appropriate network ac
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PIRATEBAY_GRPC_ADDR` | `:9485` | gRPC listen address (registered as `HTTPAddr` for discovery) |
-| `PIRATEBAY_API_BASE` | _(empty)_ | Apibay-compatible API base; required for live search |
+| `PIRATEBAY_API_BASE` | _(empty)_ | Apibay-compatible API base; live search requires this **and** `WG_CONF` |
+| `INDEXER_FIXTURE` | `0` | When `1`/`true`, serve embedded search fixtures (no network; ignores live base) |
+| `WG_CONF` | _(empty)_ | WireGuard conf path; required for live Apibay HTTP (iface = conf basename) |
 | `PIRATEBAY_ENRICH_DETAILS` | `false` | When `1`/`true`, fetch `/t.php` for top search hits (extra upstream calls) |
 | `PIRATEBAY_ENRICH_LIMIT` | `5` | Max hits to enrich (capped at 25) |
 | `MUXCORE_GRPC_ADDR` | — | Core mesh address |

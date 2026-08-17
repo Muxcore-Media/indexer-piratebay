@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	modulesdk "github.com/Muxcore-Media/core/sdk/go/module"
@@ -58,9 +59,27 @@ func (m *Module) updateSetting(key, value string) error {
 	switch key {
 	case "base_url", "PIRATEBAY_API_BASE":
 		value = strings.TrimRight(strings.TrimSpace(value), "/")
+		if value != "" && !m.fixtureMode && !m.httpInjected {
+			if err := enforceLiveIndexerVPN(m.wgConfPath, value, false, false); err != nil {
+				return err
+			}
+			bound, iface, err := newVPNBoundHTTPClient(m.wgConfPath, 20*time.Second)
+			if err != nil {
+				return fmt.Errorf("vpn-bound HTTP client: %w", err)
+			}
+			m.mu.Lock()
+			m.baseURL = value
+			m.http = bound
+			m.vpnIface = iface
+			m.api = newApibayClient(m.baseURL, bound)
+			m.mu.Unlock()
+			return nil
+		}
 		m.mu.Lock()
 		m.baseURL = value
-		m.api = newApibayClient(m.baseURL, m.http)
+		if !m.fixtureMode {
+			m.api = newApibayClient(m.baseURL, m.http)
+		}
 		m.mu.Unlock()
 		return nil
 	case "enrich_details", "PIRATEBAY_ENRICH_DETAILS":
