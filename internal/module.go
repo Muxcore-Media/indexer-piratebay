@@ -191,6 +191,12 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 	if query == "" {
 		return &indexerv1.SearchResponse{}, nil
 	}
+	if y := req.GetYear(); y > 0 && req.GetType() == "movie" {
+		ys := strconv.Itoa(int(y))
+		if !strings.Contains(query, ys) {
+			query = query + " " + ys
+		}
+	}
 	cat := categoryForSearch(req.GetType(), req.GetCategories())
 
 	m.mu.RLock()
