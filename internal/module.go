@@ -21,16 +21,20 @@ import (
 type Module struct {
 	indexerv1.UnimplementedIndexerServiceServer
 
-	mu          sync.RWMutex
-	api         searchAPI
-	baseURL     string
-	id          string
-	grpcAddr    string
-	grpcSrv     *grpc.Server
-	lis         net.Listener
-	http        *http.Client
-	enrich      bool
-	enrichLimit int
+	mu           sync.RWMutex
+	api          searchAPI
+	baseURL      string
+	id           string
+	grpcAddr     string
+	grpcSrv      *grpc.Server
+	lis          net.Listener
+	http         *http.Client
+	enrich       bool
+	enrichLimit  int
+	fixtureMode  bool
+	httpInjected bool
+	wgConfPath   string
+	vpnIface     string
 }
 
 type Config struct {
@@ -43,6 +47,9 @@ type Config struct {
 	Enrich      bool         // optional; when set, overrides env default
 	EnrichSet   bool         // true if Enrich was explicitly provided
 	EnrichLimit int          // max hits to enrich (0 → default 5)
+	Fixture     bool         // INDEXER_FIXTURE offline sample search
+	WGConfPath  string       // WireGuard conf for live HTTP source-bind
+	SkipVPNGate bool         // tests only: allow live base without WG
 }
 
 func NewModule(cfg Config) *Module {
@@ -58,14 +65,23 @@ func NewModule(cfg Config) *Module {
 	if v := os.Getenv("PIRATEBAY_GRPC_ADDR"); v != "" {
 		cfg.GRPCAddr = v
 	}
+	fixture := indexerFixtureMode(cfg.Fixture)
 	// Live upstream only when explicitly configured — empty means no network.
 	// Config.BaseURL wins when set; otherwise fall back to PIRATEBAY_API_BASE.
-	if cfg.BaseURL == "" {
+	// Fixture mode clears live base unless API/HTTP was injected for unit tests.
+	if cfg.BaseURL == "" && !fixture {
 		if v := os.Getenv("PIRATEBAY_API_BASE"); v != "" {
 			cfg.BaseURL = strings.TrimSpace(v)
 		}
 	}
+	if fixture && cfg.API == nil && cfg.HTTP == nil {
+		cfg.BaseURL = ""
+	}
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+
+	if cfg.WGConfPath == "" {
+		cfg.WGConfPath = strings.TrimSpace(os.Getenv("WG_CONF"))
+	}
 
 	enrich := false
 	if cfg.EnrichSet {
@@ -86,22 +102,43 @@ func NewModule(cfg Config) *Module {
 		enrichLimit = 25
 	}
 
+	httpInjected := cfg.HTTP != nil
 	hc := cfg.HTTP
+	vpnIface := ""
+	if hc == nil && !fixture && cfg.BaseURL != "" && !cfg.SkipVPNGate {
+		bound, iface, err := newVPNBoundHTTPClient(cfg.WGConfPath, cfg.Timeout)
+		if err == nil {
+			hc = bound
+			vpnIface = iface
+		}
+		// If bind fails here (iface down), Init will surface the gate / bind error.
+		if hc == nil {
+			hc = &http.Client{Timeout: cfg.Timeout}
+		}
+	}
 	if hc == nil {
 		hc = &http.Client{Timeout: cfg.Timeout}
 	}
 
 	m := &Module{
-		id:          cfg.ID,
-		grpcAddr:    cfg.GRPCAddr,
-		baseURL:     cfg.BaseURL,
-		http:        hc,
-		api:         cfg.API,
-		enrich:      enrich,
-		enrichLimit: enrichLimit,
+		id:           cfg.ID,
+		grpcAddr:     cfg.GRPCAddr,
+		baseURL:      cfg.BaseURL,
+		http:         hc,
+		api:          cfg.API,
+		enrich:       enrich,
+		enrichLimit:  enrichLimit,
+		fixtureMode:  fixture,
+		httpInjected: httpInjected || cfg.SkipVPNGate,
+		wgConfPath:   cfg.WGConfPath,
+		vpnIface:     vpnIface,
 	}
 	if m.api == nil {
-		m.api = newApibayClient(m.baseURL, hc)
+		if m.fixtureMode {
+			m.api = newFixtureAPI()
+		} else {
+			m.api = newApibayClient(m.baseURL, hc)
+		}
 	}
 	return m
 }
@@ -133,6 +170,19 @@ func (m *Module) Info() contracts.ModuleInfo {
 }
 
 func (m *Module) Init(ctx context.Context) error {
+	if err := enforceLiveIndexerVPN(m.wgConfPath, m.baseURL, m.fixtureMode, m.httpInjected); err != nil {
+		return err
+	}
+	// Live Apibay: rebuild HTTP client on the WG iface when not injected (shared policy with downloader).
+	if liveHTTPRequiresVPN(m.baseURL, m.fixtureMode, m.httpInjected) && m.vpnIface == "" {
+		bound, iface, err := newVPNBoundHTTPClient(m.wgConfPath, 20*time.Second)
+		if err != nil {
+			return fmt.Errorf("vpn-bound HTTP client: %w", err)
+		}
+		m.http = bound
+		m.vpnIface = iface
+		m.api = newApibayClient(m.baseURL, bound)
+	}
 	lis, err := net.Listen("tcp", m.grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen gRPC %s: %w", m.grpcAddr, err)
@@ -144,7 +194,9 @@ func (m *Module) Init(ctx context.Context) error {
 	}
 	slog.Info("indexer-piratebay initialized",
 		"grpc", m.grpcAddr,
-		"configured", m.baseURL != "",
+		"configured", m.configured(),
+		"fixture", m.fixtureMode,
+		"vpn_iface", m.vpnIface,
 		"enrich_details", m.enrich,
 		"enrich_limit", m.enrichLimit,
 	)
@@ -179,13 +231,22 @@ func (m *Module) Health(ctx context.Context) error {
 func (m *Module) configured() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.baseURL != ""
+	return m.fixtureMode || m.baseURL != ""
 }
 
 func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*indexerv1.SearchResponse, error) {
 	if !m.configured() {
 		slog.Debug("indexer-piratebay: not configured (PIRATEBAY_API_BASE empty), returning no results")
 		return &indexerv1.SearchResponse{}, nil
+	}
+	m.mu.RLock()
+	base := m.baseURL
+	fixture := m.fixtureMode
+	injected := m.httpInjected
+	wg := m.wgConfPath
+	m.mu.RUnlock()
+	if err := enforceLiveIndexerVPN(wg, base, fixture, injected); err != nil {
+		return nil, err
 	}
 	query := strings.TrimSpace(req.GetQuery())
 	if query == "" {
@@ -201,7 +262,7 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 
 	m.mu.RLock()
 	api := m.api
-	base := m.baseURL
+	base = m.baseURL
 	m.mu.RUnlock()
 
 	hits, err := api.Search(ctx, query, cat)
