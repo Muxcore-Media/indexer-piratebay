@@ -4,6 +4,7 @@
 
 - Live Apibay HTTP source-bound to WireGuard iface from `WG_CONF` (`SO_BINDTODEVICE`); refuse live base without VPN
 - `INDEXER_FIXTURE=1` embedded search fixtures for offline caps/search; capability discovery without live Apibay
+- Movie searches append `year` to the Apibay query (vault-tested)
 
 ## v0.1.2 (2026-08-09)
 
