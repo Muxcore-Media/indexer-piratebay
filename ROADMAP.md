@@ -11,4 +11,4 @@
 
 ## Remaining
 
-- [ ] Optional torrent detail enrichment (no extra calls by default)
+- [x] Optional torrent detail enrichment (no extra calls by default)
