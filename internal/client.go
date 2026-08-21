@@ -3,10 +3,12 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,15 +84,63 @@ func bytesTrimSpace(b []byte) []byte {
 	return []byte(strings.TrimSpace(string(b)))
 }
 
+const (
+	defaultApibayMinInterval = 2 * time.Second
+	defaultApibayCacheTTL    = 10 * time.Minute
+	minApibayCooldown        = 15 * time.Minute
+)
+
+// rateLimitedError is returned when Apibay 429s; Search maps it to ResourceExhausted.
+type rateLimitedError struct {
+	until time.Time
+	msg   string
+}
+
+func (e *rateLimitedError) Error() string {
+	if e == nil {
+		return "apibay rate limited"
+	}
+	until := e.until.UTC().Format(time.RFC3339)
+	if e.msg == "" {
+		return "apibay rate limited until " + until
+	}
+	return "apibay rate limited until " + until + ": " + e.msg
+}
+
+func isRateLimited(err error) bool {
+	var e *rateLimitedError
+	return errors.As(err, &e)
+}
+
+type apibayCacheEntry struct {
+	hits  []apibayHit
+	until time.Time
+}
+
 // apibayClient talks to an Apibay-compatible base URL.
 // If baseURL is empty, Search returns nil without making any HTTP request.
 type apibayClient struct {
-	baseURL    string
-	http       *http.Client
-	mu         sync.Mutex
-	lastCall   time.Time
-	minInterval time.Duration
-	maxRetries int
+	baseURL       string
+	http          *http.Client
+	mu            sync.Mutex
+	lastCall      time.Time
+	minInterval   time.Duration
+	maxRetries    int
+	cooldownUntil time.Time
+	cacheTTL      time.Duration
+	cache         map[string]apibayCacheEntry
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
 }
 
 func newApibayClient(baseURL string, hc *http.Client) *apibayClient {
@@ -101,8 +151,10 @@ func newApibayClient(baseURL string, hc *http.Client) *apibayClient {
 	return &apibayClient{
 		baseURL:     baseURL,
 		http:        hc,
-		minInterval: 500 * time.Millisecond,
+		minInterval: envDuration("PIRATEBAY_MIN_INTERVAL", defaultApibayMinInterval),
 		maxRetries:  3,
+		cacheTTL:    envDuration("PIRATEBAY_CACHE_TTL", defaultApibayCacheTTL),
+		cache:       make(map[string]apibayCacheEntry),
 	}
 }
 
@@ -133,9 +185,45 @@ func (c *apibayClient) markCall() {
 	c.mu.Unlock()
 }
 
+func (c *apibayClient) cacheKey(query string, cat int) string {
+	return strconv.Itoa(cat) + "\x00" + strings.ToLower(strings.TrimSpace(query))
+}
+
+func (c *apibayClient) cacheGet(query string, cat int) ([]apibayHit, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cacheTTL <= 0 || c.cache == nil {
+		return nil, false
+	}
+	ent, ok := c.cache[c.cacheKey(query, cat)]
+	if !ok || time.Now().After(ent.until) {
+		return nil, false
+	}
+	out := make([]apibayHit, len(ent.hits))
+	copy(out, ent.hits)
+	return out, true
+}
+
+func (c *apibayClient) cachePut(query string, cat int, hits []apibayHit) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cacheTTL <= 0 {
+		return
+	}
+	if c.cache == nil {
+		c.cache = make(map[string]apibayCacheEntry)
+	}
+	stored := make([]apibayHit, len(hits))
+	copy(stored, hits)
+	c.cache[c.cacheKey(query, cat)] = apibayCacheEntry{hits: stored, until: time.Now().Add(c.cacheTTL)}
+}
+
 func (c *apibayClient) Search(ctx context.Context, query string, cat int) ([]apibayHit, error) {
 	if !c.configured() {
 		return nil, nil
+	}
+	if hits, ok := c.cacheGet(query, cat); ok {
+		return hits, nil
 	}
 	u, err := url.Parse(c.baseURL + "/q.php")
 	if err != nil {
@@ -150,7 +238,12 @@ func (c *apibayClient) Search(ctx context.Context, query string, cat int) ([]api
 	if err != nil {
 		return nil, err
 	}
-	return parseApibayHits(body)
+	hits, err := parseApibayHits(body)
+	if err != nil {
+		return nil, err
+	}
+	c.cachePut(query, cat, hits)
+	return hits, nil
 }
 
 // Detail fetches a single torrent via Apibay /t.php?id=.
@@ -177,7 +270,47 @@ func (c *apibayClient) Detail(ctx context.Context, id string) (*apibayHit, error
 	return parseApibayDetail(body)
 }
 
+func parseRetryAfter(h http.Header, now time.Time) time.Duration {
+	raw := strings.TrimSpace(h.Get("Retry-After"))
+	if raw == "" {
+		return minApibayCooldown
+	}
+	if secs, err := strconv.Atoi(raw); err == nil {
+		d := time.Duration(secs) * time.Second
+		if d < minApibayCooldown {
+			return minApibayCooldown
+		}
+		return d
+	}
+	if t, err := http.ParseTime(raw); err == nil {
+		d := t.Sub(now)
+		if d < minApibayCooldown {
+			return minApibayCooldown
+		}
+		return d
+	}
+	return minApibayCooldown
+}
+
+func (c *apibayClient) setCooldown(d time.Duration, msg string) *rateLimitedError {
+	if d < minApibayCooldown {
+		d = minApibayCooldown
+	}
+	until := time.Now().Add(d)
+	c.mu.Lock()
+	c.cooldownUntil = until
+	c.mu.Unlock()
+	return &rateLimitedError{until: until, msg: msg}
+}
+
 func (c *apibayClient) getJSON(ctx context.Context, rawURL, op string) ([]byte, error) {
+	c.mu.Lock()
+	until := c.cooldownUntil
+	c.mu.Unlock()
+	if !until.IsZero() && time.Now().Before(until) {
+		return nil, &rateLimitedError{until: until, msg: op}
+	}
+
 	var lastErr error
 	backoff := 500 * time.Millisecond
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
@@ -211,7 +344,10 @@ func (c *apibayClient) getJSON(ctx context.Context, rawURL, op string) ([]byte, 
 		switch {
 		case resp.StatusCode == http.StatusOK:
 			return body, nil
-		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+		case resp.StatusCode == http.StatusTooManyRequests:
+			msg := truncate(string(body), 200)
+			return nil, c.setCooldown(parseRetryAfter(resp.Header, time.Now()), fmt.Sprintf("%s status 429: %s", op, msg))
+		case resp.StatusCode >= 500:
 			lastErr = fmt.Errorf("%s status %d: %s", op, resp.StatusCode, truncate(string(body), 200))
 			if attempt == c.maxRetries {
 				break

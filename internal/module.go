@@ -13,9 +13,12 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	indexerv1 "github.com/Muxcore-Media/contracts-indexer/muxcore/indexer/v1"
 	"github.com/Muxcore-Media/core/pkg/contracts"
+	"github.com/Muxcore-Media/core/sdk/go/client"
 )
 
 type Module struct {
@@ -35,6 +38,7 @@ type Module struct {
 	httpInjected bool
 	wgConfPath   string
 	vpnIface     string
+	mc           *client.Client
 }
 
 type Config struct {
@@ -156,7 +160,7 @@ func (m *Module) Info() contracts.ModuleInfo {
 	return contracts.ModuleInfo{
 		ID:           m.id,
 		Name:         "Pirate Bay Indexer",
-		Version:      "0.1.0",
+		Version:      "0.1.1",
 		Roles:        []string{"indexer"},
 		Description:  "Single-site The Pirate Bay indexer via Apibay-compatible JSON API",
 		Author:       "MuxCore",
@@ -213,6 +217,7 @@ func (m *Module) Start(ctx context.Context) error {
 			slog.Error("indexer-piratebay gRPC serve error", "error", err)
 		}
 	}()
+	go m.dialCore(context.Background())
 	return nil
 }
 
@@ -220,6 +225,12 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.grpcSrv != nil {
 		m.grpcSrv.GracefulStop()
 	}
+	m.mu.Lock()
+	if m.mc != nil {
+		_ = m.mc.Close()
+		m.mc = nil
+	}
+	m.mu.Unlock()
 	slog.Info("indexer-piratebay stopped")
 	return nil
 }
@@ -268,6 +279,9 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 	hits, err := api.Search(ctx, query, cat)
 	if err != nil {
 		slog.Warn("indexer-piratebay search failed", "error", err)
+		if isRateLimited(err) {
+			return nil, status.Errorf(codes.ResourceExhausted, "search: %v", err)
+		}
 		return nil, fmt.Errorf("search: %w", err)
 	}
 	page := pageHits(hits, int(req.GetOffset()), int(req.GetLimit()))
@@ -279,6 +293,7 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 		page = m.enrichHits(ctx, api, page, enrichLimit)
 	}
 	results := mapHits(page, base)
+	go m.cacheHitsInStorage(results)
 	return &indexerv1.SearchResponse{
 		Results: results,
 		Total:   int32(len(results)),
