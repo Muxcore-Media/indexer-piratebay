@@ -79,12 +79,67 @@ func TestApibayClientHTTPtest(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := newApibayClient(srv.URL, srv.Client())
+	c.minInterval = 0
 	hits, err := c.Search(context.Background(), "Fight Club", 201)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(hits) != 2 {
 		t.Fatalf("got %d hits", len(hits))
+	}
+}
+
+func TestApibay429Cooldown(t *testing.T) {
+	var dials int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dials++
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("429 Too Many Requests"))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newApibayClient(srv.URL, srv.Client())
+	c.minInterval = 0
+	c.maxRetries = 0
+	c.cacheTTL = 0
+	_, err := c.Search(context.Background(), "Fight Club", 201)
+	if !isRateLimited(err) {
+		t.Fatalf("first search err=%v want rate limited", err)
+	}
+	_, err = c.Search(context.Background(), "Arthur", 205)
+	if !isRateLimited(err) {
+		t.Fatalf("second search err=%v want cooldown", err)
+	}
+	if dials != 1 {
+		t.Fatalf("dials=%d want 1 (cooldown skips upstream)", dials)
+	}
+}
+
+func TestApibaySearchCache(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "search_sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dials int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dials++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newApibayClient(srv.URL, srv.Client())
+	c.minInterval = 0
+	ctx := context.Background()
+	if _, err := c.Search(ctx, "Fight Club", 201); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Search(ctx, "Fight Club", 201); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 1 {
+		t.Fatalf("dials=%d want 1 (cached)", dials)
 	}
 }
 
