@@ -15,7 +15,7 @@
     {
       "repo": "github.com/Muxcore-Media/contracts-indexer",
       "interface": "Indexer",
-      "version": "v1"
+      "version": "v0.1.0"
     }
   ]
 }
