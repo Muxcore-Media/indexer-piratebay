@@ -21,9 +21,9 @@ type torrentIndexEntry struct {
 	InfoHash    string `json:"infohash"`
 	Title       string `json:"title"`
 	DownloadURL string `json:"download_url"`
-	Size        int64  `json:"size,omitempty"`
 	Indexer     string `json:"indexer,omitempty"`
 	CachedAt    string `json:"cached_at"`
+	Size        int64  `json:"size,omitempty"`
 }
 
 var btihRe = regexp.MustCompile(`(?i)(?:urn:btih:|btih[=:])([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})`)
@@ -65,14 +65,14 @@ func (m *Module) dialCore(ctx context.Context) {
 	_ = ctx
 }
 
-func (m *Module) cacheHitsInStorage(results []*indexerv1.SearchResult) {
+func (m *Module) cacheHitsInStorage(ctx context.Context, results []*indexerv1.SearchResult) {
 	m.mu.RLock()
 	mc := m.mc
 	m.mu.RUnlock()
 	if mc == nil || len(results) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for _, r := range results {
 		if r == nil {

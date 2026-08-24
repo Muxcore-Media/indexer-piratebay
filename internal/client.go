@@ -113,22 +113,22 @@ func isRateLimited(err error) bool {
 }
 
 type apibayCacheEntry struct {
-	hits  []apibayHit
 	until time.Time
+	hits  []apibayHit
 }
 
 // apibayClient talks to an Apibay-compatible base URL.
 // If baseURL is empty, Search returns nil without making any HTTP request.
 type apibayClient struct {
-	baseURL       string
-	http          *http.Client
-	mu            sync.Mutex
 	lastCall      time.Time
+	cooldownUntil time.Time
+	http          *http.Client
+	cache         map[string]apibayCacheEntry
+	baseURL       string
 	minInterval   time.Duration
 	maxRetries    int
-	cooldownUntil time.Time
 	cacheTTL      time.Duration
-	cache         map[string]apibayCacheEntry
+	mu            sync.Mutex
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {
@@ -317,7 +317,7 @@ func (c *apibayClient) getJSON(ctx context.Context, rawURL, op string) ([]byte, 
 		if err := c.waitRate(ctx); err != nil {
 			return nil, err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
 		if err != nil {
 			return nil, err
 		}
@@ -337,7 +337,9 @@ func (c *apibayClient) getJSON(ctx context.Context, rawURL, op string) ([]byte, 
 			continue
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-		resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil && readErr == nil {
+			readErr = closeErr
+		}
 		if readErr != nil {
 			return nil, fmt.Errorf("read body: %w", readErr)
 		}

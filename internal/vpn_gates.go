@@ -27,6 +27,7 @@ func validateWGConfReadable(path string) error {
 	if path == "" {
 		return fmt.Errorf("WG_CONF is required for live Apibay HTTP (set WG_CONF, or INDEXER_FIXTURE=1 / leave PIRATEBAY_API_BASE empty)")
 	}
+	//nolint:gosec // WG_CONF is an operator-controlled deployment path, not request input
 	fi, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("WG_CONF missing or unreadable (%s): %w", path, err)
@@ -34,6 +35,7 @@ func validateWGConfReadable(path string) error {
 	if fi.IsDir() {
 		return fmt.Errorf("WG_CONF is a directory, not a file: %s", path)
 	}
+	//nolint:gosec // WG_CONF is an operator-controlled deployment path, not request input
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("WG_CONF unreadable (%s): %w", path, err)
@@ -43,7 +45,7 @@ func validateWGConfReadable(path string) error {
 }
 
 // liveHTTPRequiresVPN is true when a remote Apibay base is configured outside fixture/test inject paths.
-func liveHTTPRequiresVPN(baseURL string, fixture bool, httpInjected bool) bool {
+func liveHTTPRequiresVPN(baseURL string, fixture, httpInjected bool) bool {
 	if fixture || httpInjected {
 		return false
 	}

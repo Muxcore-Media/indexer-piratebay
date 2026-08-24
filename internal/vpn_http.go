@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -87,22 +86,4 @@ func newVPNBoundHTTPClient(wgConf string, timeout time.Duration) (*http.Client, 
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 	return &http.Client{Timeout: timeout, Transport: tr}, iface, nil
-}
-
-// dialContextViaIface is exported for tests that assert Control wiring without a real WG device.
-func dialContextViaIface(ctx context.Context, iface string, localIP net.IP, network, address string) (net.Conn, error) {
-	d := &net.Dialer{
-		Timeout:   5 * time.Second,
-		LocalAddr: &net.TCPAddr{IP: localIP},
-		Control: func(network, address string, c syscall.RawConn) error {
-			var ctrlErr error
-			if err := c.Control(func(fd uintptr) {
-				ctrlErr = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface)
-			}); err != nil {
-				return err
-			}
-			return ctrlErr
-		},
-	}
-	return d.DialContext(ctx, network, address)
 }
