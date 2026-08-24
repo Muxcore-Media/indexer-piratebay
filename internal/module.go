@@ -23,38 +23,37 @@ import (
 
 type Module struct {
 	indexerv1.UnimplementedIndexerServiceServer
-
-	mu           sync.RWMutex
 	api          searchAPI
-	baseURL      string
+	lis          net.Listener
+	grpcSrv      *grpc.Server
+	mc           *client.Client
+	http         *http.Client
 	id           string
 	grpcAddr     string
-	grpcSrv      *grpc.Server
-	lis          net.Listener
-	http         *http.Client
-	enrich       bool
-	enrichLimit  int
-	fixtureMode  bool
-	httpInjected bool
+	baseURL      string
 	wgConfPath   string
 	vpnIface     string
+	enrichLimit  int
 	httpTimeout  time.Duration
-	mc           *client.Client
+	mu           sync.RWMutex
+	enrich       bool
+	fixtureMode  bool
+	httpInjected bool
 }
 
 type Config struct {
+	API         searchAPI
+	HTTP        *http.Client
 	ID          string
 	GRPCAddr    string
 	BaseURL     string
+	WGConfPath  string
 	Timeout     time.Duration
-	HTTP        *http.Client // optional; for tests inject httptest transport
-	API         searchAPI    // optional; overrides Apibay client when set
-	Enrich      bool         // optional; when set, overrides env default
-	EnrichSet   bool         // true if Enrich was explicitly provided
-	EnrichLimit int          // max hits to enrich (0 → default 5)
-	Fixture     bool         // INDEXER_FIXTURE offline sample search
-	WGConfPath  string       // WireGuard conf for live HTTP source-bind
-	SkipVPNGate bool         // tests only: allow live base without WG
+	EnrichLimit int
+	Enrich      bool
+	EnrichSet   bool
+	Fixture     bool
+	SkipVPNGate bool
 }
 
 func NewModule(cfg Config) *Module {
@@ -189,7 +188,8 @@ func (m *Module) Init(ctx context.Context) error {
 		m.vpnIface = iface
 		m.api = newApibayClient(m.baseURL, bound)
 	}
-	lis, err := net.Listen("tcp", m.grpcAddr)
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "tcp", m.grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen gRPC %s: %w", m.grpcAddr, err)
 	}
@@ -219,7 +219,7 @@ func (m *Module) Start(ctx context.Context) error {
 			slog.Error("indexer-piratebay gRPC serve error", "error", err)
 		}
 	}()
-	go m.dialCore(context.Background())
+	go m.dialCore(ctx)
 	return nil
 }
 
@@ -295,10 +295,10 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 		page = m.enrichHits(ctx, api, page, enrichLimit)
 	}
 	results := mapHits(page, base)
-	go m.cacheHitsInStorage(results)
+	go m.cacheHitsInStorage(ctx, results)
 	return &indexerv1.SearchResponse{
 		Results: results,
-		Total:   int32(len(results)),
+		Total:   int32FromInt(len(results)),
 	}, nil
 }
 
