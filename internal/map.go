@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -15,6 +16,16 @@ const (
 	indexerName = "The Pirate Bay"
 	indexerID   = int32(1)
 )
+
+func int32FromInt(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v)
+}
 
 // Apibay top-level category codes (partial tree used by search).
 // 100 Audio, 101 Music, 102 Audio books, 103 Sound clips, 104 FLAC, 199 Other
@@ -135,7 +146,7 @@ func hitToSearchResult(h apibayHit, apiBase string) *indexerv1.SearchResult {
 
 	infoURL := ""
 	if apiBase != "" && h.ID.String() != "" {
-			// When detail enrich ran, point InfoUrl at /t.php (JSON includes descr/NFO).
+		// When detail enrich ran, point InfoUrl at /t.php (JSON includes descr/NFO).
 		if strings.TrimSpace(h.Descr) != "" {
 			infoURL = strings.TrimRight(apiBase, "/") + "/t.php?id=" + url.QueryEscape(h.ID.String())
 		} else {
@@ -160,8 +171,8 @@ func hitToSearchResult(h apibayHit, apiBase string) *indexerv1.SearchResult {
 		InfoUrl:          infoURL,
 		DownloadUrl:      magnet,
 		Size:             h.Size.Int64(),
-		Seeders:          int32(h.Seeders.Int()),
-		Peers:            int32(h.Leechers.Int()),
+		Seeders:          int32FromInt(h.Seeders.Int()),
+		Peers:            int32FromInt(h.Leechers.Int()),
 		IndexerName:      indexerName,
 		IndexerId:        indexerID,
 		PublishDate:      pub,
