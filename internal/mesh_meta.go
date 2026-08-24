@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -94,7 +95,7 @@ func (m *Module) cacheHitsInStorage(results []*indexerv1.SearchResult) {
 			continue
 		}
 		key := fmt.Sprintf("torrent/%s/index.json", ih)
-		if err := mc.Storage.PutBytes(ctx, key, data); err != nil {
+		if err := mc.Storage.Put(ctx, key, bytes.NewReader(data)); err != nil {
 			slog.Debug("indexer-piratebay: cache index", "key", key, "error", err)
 		}
 	}

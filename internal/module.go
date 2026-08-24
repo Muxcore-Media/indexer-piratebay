@@ -38,6 +38,7 @@ type Module struct {
 	httpInjected bool
 	wgConfPath   string
 	vpnIface     string
+	httpTimeout  time.Duration
 	mc           *client.Client
 }
 
@@ -136,6 +137,7 @@ func NewModule(cfg Config) *Module {
 		httpInjected: httpInjected || cfg.SkipVPNGate,
 		wgConfPath:   cfg.WGConfPath,
 		vpnIface:     vpnIface,
+		httpTimeout:  cfg.Timeout,
 	}
 	if m.api == nil {
 		if m.fixtureMode {
@@ -179,7 +181,7 @@ func (m *Module) Init(ctx context.Context) error {
 	}
 	// Live Apibay: rebuild HTTP client on the WG iface when not injected (shared policy with downloader).
 	if liveHTTPRequiresVPN(m.baseURL, m.fixtureMode, m.httpInjected) && m.vpnIface == "" {
-		bound, iface, err := newVPNBoundHTTPClient(m.wgConfPath, 20*time.Second)
+		bound, iface, err := newVPNBoundHTTPClient(m.wgConfPath, m.httpTimeout)
 		if err != nil {
 			return fmt.Errorf("vpn-bound HTTP client: %w", err)
 		}
