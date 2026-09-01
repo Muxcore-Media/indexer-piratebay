@@ -156,3 +156,57 @@ func TestIfaceFromWGConf(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestHealthLiveMissingVPNIface(t *testing.T) {
+	wgFile := filepath.Join(t.TempDir(), "wg-missing.conf")
+	if err := os.WriteFile(wgFile, []byte("[Interface]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModule(Config{
+		GRPCAddr:   ":0",
+		BaseURL:    "https://apibay.example.test",
+		WGConfPath: wgFile,
+	})
+	ctx := context.Background()
+	if err := m.Health(ctx); err == nil {
+		t.Fatal("expected health error when VPN iface unavailable")
+	}
+}
+
+func TestHealthFixtureStaysHealthy(t *testing.T) {
+	m := NewModule(Config{GRPCAddr: ":0", Fixture: true})
+	ctx := context.Background()
+	if err := m.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Health(ctx); err != nil {
+		t.Fatalf("fixture health: %v", err)
+	}
+}
+
+func TestHealthUnconfiguredStaysHealthy(t *testing.T) {
+	m := NewModule(Config{GRPCAddr: ":0", BaseURL: ""})
+	if err := m.Health(context.Background()); err != nil {
+		t.Fatalf("unconfigured health: %v", err)
+	}
+}
+
+func TestSearchLiveVPNBindFailureDoesNotDial(t *testing.T) {
+	wgFile := filepath.Join(t.TempDir(), "wg-nobind.conf")
+	if err := os.WriteFile(wgFile, []byte("[Interface]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModule(Config{
+		GRPCAddr:   ":0",
+		BaseURL:    "https://apibay.example.test",
+		WGConfPath: wgFile,
+	})
+	ctx := context.Background()
+	_, err := m.Search(ctx, &indexerv1.SearchRequest{Query: "Fight Club", Type: "movie"})
+	if err == nil {
+		t.Fatal("expected error when live HTTP required without VPN bind")
+	}
+	if !strings.Contains(err.Error(), "VPN") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

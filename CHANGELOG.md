@@ -1,20 +1,15 @@
 # Changelog
 
-## v0.1.1 (2026-08-20)
+## v0.1.1 (2026-08-31)
 
-- Mesh StorageService cache: search hits with a btih are written to `torrent/{infohash}/index.json` when `MUXCORE_GRPC_ADDR` is set (same key space as downloader pieces / metainfo).
-
-## Unreleased
-
-- Live Apibay HTTP source-bound to WireGuard iface from `WG_CONF` (`SO_BINDTODEVICE`); refuse live base without VPN
+- Live Apibay HTTP source-bound to WireGuard iface from `WG_CONF` (`SO_BINDTODEVICE`); refuse live base without VPN-bound client
 - `INDEXER_FIXTURE=1` embedded search fixtures for offline caps/search; capability discovery without live Apibay
-- Movie searches append `year` to the Apibay query (vault-tested)
+- Movie searches append `year` to the Apibay query; TV searches append `Sxx` / `SxxExx` / absolute tokens
+- Mesh StorageService cache: search hits with a btih are written to `torrent/{infohash}/index.json` when core is reachable
+- Optional torrent detail enrichment via Apibay `/t.php` (`PIRATEBAY_ENRICH_DETAILS=1`, settings `enrich_details` / `enrich_limit`; off by default)
+- Search `Total` reports unpaged hit count; stable `User-Agent`; Forgejo CI runs `golangci-lint`
 
-## v0.1.2 (2026-08-09)
-
-- Optional torrent detail enrichment via Apibay `/t.php` (`PIRATEBAY_ENRICH_DETAILS=1`, settings `enrich_details` / `enrich_limit`; off by default). Refreshes seeders/peers/size/imdb and points `info_url` at `/t.php` when a description is present.
-
-## v0.1.0
+## v0.1.0 (2026-08-09)
 
 - Initial release: `IndexerService` for The Pirate Bay via Apibay-compatible JSON
 - Capability `indexer` (+ `settings`) for media-automation fan-out and runtime base URL

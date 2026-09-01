@@ -31,6 +31,8 @@ Operators should configure a base URL only when Proton WireGuard is up (`./scrip
 | `WG_CONF` | _(empty)_ | WireGuard conf path; required for live Apibay HTTP (iface = conf basename) |
 | `PIRATEBAY_ENRICH_DETAILS` | `false` | When `1`/`true`, fetch `/t.php` for top search hits (extra upstream calls) |
 | `PIRATEBAY_ENRICH_LIMIT` | `5` | Max hits to enrich (capped at 25) |
+| `PIRATEBAY_MIN_INTERVAL` | `2s` | Minimum interval between Apibay HTTP requests |
+| `PIRATEBAY_CACHE_TTL` | `10m` | In-memory search result cache TTL |
 | `MUXCORE_GRPC_ADDR` | — | Core mesh address |
 | `MUXCORE_INSECURE_DISABLE_TLS` | `false` | Disable TLS for local core |
 

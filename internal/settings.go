@@ -71,14 +71,14 @@ func (m *Module) updateSetting(key, value string) error {
 			m.baseURL = value
 			m.http = bound
 			m.vpnIface = iface
-			m.api = newApibayClient(m.baseURL, bound)
+			m.api = newApibayClient(m.baseURL, bound, m.version)
 			m.mu.Unlock()
 			return nil
 		}
 		m.mu.Lock()
 		m.baseURL = value
 		if !m.fixtureMode {
-			m.api = newApibayClient(m.baseURL, m.http)
+			m.api = newApibayClient(m.baseURL, m.http, m.version)
 		}
 		m.mu.Unlock()
 		return nil

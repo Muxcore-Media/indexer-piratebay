@@ -8,7 +8,7 @@ MuxCore sidecar module (`indexer-piratebay`). Workspace deploy and SSH: [`../AGE
 |-------|-------|
 | Directory | `indexer-piratebay` |
 | Capabilities | see muxcore.json |
-| Contracts | none declared |
+| Contracts | `contracts-indexer` (`Indexer` / `IndexerService`) |
 
 ## Agent rules
 

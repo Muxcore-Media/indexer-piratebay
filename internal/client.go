@@ -125,6 +125,7 @@ type apibayClient struct {
 	http          *http.Client
 	cache         map[string]apibayCacheEntry
 	baseURL       string
+	userAgent     string
 	minInterval   time.Duration
 	maxRetries    int
 	cacheTTL      time.Duration
@@ -143,14 +144,18 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 	return d
 }
 
-func newApibayClient(baseURL string, hc *http.Client) *apibayClient {
+func newApibayClient(baseURL string, hc *http.Client, version string) *apibayClient {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if hc == nil {
+	if hc == nil && baseURL == "" {
 		hc = &http.Client{Timeout: 20 * time.Second}
+	}
+	if version == "" {
+		version = Version
 	}
 	return &apibayClient{
 		baseURL:     baseURL,
 		http:        hc,
+		userAgent:   "muxcore-indexer-piratebay/" + version,
 		minInterval: envDuration("PIRATEBAY_MIN_INTERVAL", defaultApibayMinInterval),
 		maxRetries:  3,
 		cacheTTL:    envDuration("PIRATEBAY_CACHE_TTL", defaultApibayCacheTTL),
@@ -221,6 +226,9 @@ func (c *apibayClient) cachePut(query string, cat int, hits []apibayHit) {
 func (c *apibayClient) Search(ctx context.Context, query string, cat int) ([]apibayHit, error) {
 	if !c.configured() {
 		return nil, nil
+	}
+	if c.http == nil {
+		return nil, fmt.Errorf("apibay search: no HTTP client (VPN bind required)")
 	}
 	if hits, ok := c.cacheGet(query, cat); ok {
 		return hits, nil
@@ -322,6 +330,9 @@ func (c *apibayClient) getJSON(ctx context.Context, rawURL, op string) ([]byte, 
 			return nil, err
 		}
 		req.Header.Set("Accept", "application/json")
+		if c.userAgent != "" {
+			req.Header.Set("User-Agent", c.userAgent)
+		}
 
 		c.markCall()
 		resp, err := c.http.Do(req)
