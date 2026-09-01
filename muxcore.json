@@ -17,5 +17,6 @@
       "interface": "Indexer",
       "version": "v0.1.0"
     }
-  ]
+  ],
+  "minCoreVersion": "0.5.8"
 }

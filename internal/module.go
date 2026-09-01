@@ -23,28 +23,31 @@ import (
 
 type Module struct {
 	indexerv1.UnimplementedIndexerServiceServer
-	api          searchAPI
-	lis          net.Listener
-	grpcSrv      *grpc.Server
-	mc           *client.Client
-	http         *http.Client
-	id           string
-	grpcAddr     string
-	baseURL      string
-	wgConfPath   string
-	vpnIface     string
-	enrichLimit  int
-	httpTimeout  time.Duration
-	mu           sync.RWMutex
-	enrich       bool
-	fixtureMode  bool
-	httpInjected bool
+	api             searchAPI
+	lis             net.Listener
+	grpcSrv         *grpc.Server
+	mc              *client.Client
+	storageOverride storageWriter
+	http            *http.Client
+	id              string
+	version         string
+	grpcAddr        string
+	baseURL         string
+	wgConfPath      string
+	vpnIface        string
+	enrichLimit     int
+	httpTimeout     time.Duration
+	mu              sync.RWMutex
+	enrich          bool
+	fixtureMode     bool
+	httpInjected    bool
 }
 
 type Config struct {
 	API         searchAPI
 	HTTP        *http.Client
 	ID          string
+	Version     string
 	GRPCAddr    string
 	BaseURL     string
 	WGConfPath  string
@@ -115,17 +118,20 @@ func NewModule(cfg Config) *Module {
 			hc = bound
 			vpnIface = iface
 		}
-		// If bind fails here (iface down), Init will surface the gate / bind error.
-		if hc == nil {
-			hc = &http.Client{Timeout: cfg.Timeout}
-		}
+		// If bind fails (iface down), leave hc nil — Init/Search surface the error; no clearnet fallback.
 	}
 	if hc == nil {
 		hc = &http.Client{Timeout: cfg.Timeout}
 	}
 
+	version := strings.TrimSpace(cfg.Version)
+	if version == "" {
+		version = Version
+	}
+
 	m := &Module{
 		id:           cfg.ID,
+		version:      version,
 		grpcAddr:     cfg.GRPCAddr,
 		baseURL:      cfg.BaseURL,
 		http:         hc,
@@ -142,7 +148,7 @@ func NewModule(cfg Config) *Module {
 		if m.fixtureMode {
 			m.api = newFixtureAPI()
 		} else {
-			m.api = newApibayClient(m.baseURL, hc)
+			m.api = newApibayClient(m.baseURL, hc, version)
 		}
 	}
 	return m
@@ -158,18 +164,22 @@ func envTruthy(v string) bool {
 }
 
 func (m *Module) Info() contracts.ModuleInfo {
+	ver := m.version
+	if ver == "" {
+		ver = Version
+	}
 	return contracts.ModuleInfo{
 		ID:           m.id,
 		Name:         "Pirate Bay Indexer",
-		Version:      "0.1.1",
+		Version:      ver,
 		Roles:        []string{"indexer"},
 		Description:  "Single-site The Pirate Bay indexer via Apibay-compatible JSON API",
 		Author:       "MuxCore",
 		Capabilities: []string{"indexer", "indexer.piratebay", "settings"},
 		Contracts: []contracts.ContractDeclaration{
-			{Repo: "github.com/Muxcore-Media/contracts-indexer", Interface: "Indexer", Version: "v1"},
+			{Repo: "github.com/Muxcore-Media/contracts-indexer", Interface: "Indexer", Version: "v0.1.0"},
 		},
-		MinCoreVersion: "0.4.0",
+		MinCoreVersion: "0.5.8",
 		HTTPAddr:       m.grpcAddr,
 	}
 }
@@ -186,7 +196,7 @@ func (m *Module) Init(ctx context.Context) error {
 		}
 		m.http = bound
 		m.vpnIface = iface
-		m.api = newApibayClient(m.baseURL, bound)
+		m.api = newApibayClient(m.baseURL, bound, m.version)
 	}
 	var lc net.ListenConfig
 	lis, err := lc.Listen(ctx, "tcp", m.grpcAddr)
@@ -219,7 +229,7 @@ func (m *Module) Start(ctx context.Context) error {
 			slog.Error("indexer-piratebay gRPC serve error", "error", err)
 		}
 	}()
-	go m.dialCore(ctx)
+	go m.dialCore(context.WithoutCancel(ctx))
 	return nil
 }
 
@@ -238,6 +248,26 @@ func (m *Module) Stop(ctx context.Context) error {
 }
 
 func (m *Module) Health(ctx context.Context) error {
+	_ = ctx
+	m.mu.RLock()
+	base := m.baseURL
+	fixture := m.fixtureMode
+	injected := m.httpInjected
+	wg := m.wgConfPath
+	iface := m.vpnIface
+	m.mu.RUnlock()
+	if !liveHTTPRequiresVPN(base, fixture, injected) {
+		return nil
+	}
+	if err := validateWGConfReadable(wg); err != nil {
+		return err
+	}
+	if iface == "" {
+		return fmt.Errorf("live Apibay HTTP requires VPN-bound WireGuard interface")
+	}
+	if _, err := interfaceIPv4(iface); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -261,6 +291,9 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 	if err := enforceLiveIndexerVPN(wg, base, fixture, injected); err != nil {
 		return nil, err
 	}
+	if err := m.requireLiveVPNBound(base, fixture, injected); err != nil {
+		return nil, err
+	}
 	query := strings.TrimSpace(req.GetQuery())
 	if query == "" {
 		return &indexerv1.SearchResponse{}, nil
@@ -270,6 +303,9 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 		if !strings.Contains(query, ys) {
 			query = query + " " + ys
 		}
+	}
+	if req.GetType() == "tv" {
+		query = appendTVQueryTokens(query, req.GetSeason(), req.GetEpisode(), req.GetAbsolute())
 	}
 	cat := categoryForSearch(req.GetType(), req.GetCategories())
 
@@ -295,11 +331,51 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 		page = m.enrichHits(ctx, api, page, enrichLimit)
 	}
 	results := mapHits(page, base)
-	go m.cacheHitsInStorage(ctx, results)
+	go m.cacheHitsInStorage(context.WithoutCancel(ctx), results)
 	return &indexerv1.SearchResponse{
 		Results: results,
-		Total:   int32FromInt(len(results)),
+		Total:   int32FromInt(len(hits)),
 	}, nil
+}
+
+func appendTVQueryTokens(query string, season, episode, absolute int32) string {
+	if absolute > 0 {
+		tok := strconv.Itoa(int(absolute))
+		if !strings.Contains(query, tok) {
+			query = query + " " + tok
+		}
+		return query
+	}
+	if season <= 0 {
+		return query
+	}
+	ss := fmt.Sprintf("S%02d", season)
+	if !strings.Contains(strings.ToUpper(query), strings.ToUpper(ss)) {
+		query = query + " " + ss
+	}
+	if episode > 0 {
+		tok := fmt.Sprintf("S%02dE%02d", season, episode)
+		if !strings.Contains(strings.ToUpper(query), strings.ToUpper(tok)) {
+			query = query + " " + tok
+		}
+	}
+	return query
+}
+
+func (m *Module) requireLiveVPNBound(base string, fixture, injected bool) error {
+	if !liveHTTPRequiresVPN(base, fixture, injected) {
+		return nil
+	}
+	m.mu.RLock()
+	iface := m.vpnIface
+	m.mu.RUnlock()
+	if iface == "" {
+		return fmt.Errorf("live Apibay HTTP requires VPN-bound WireGuard interface")
+	}
+	if _, err := interfaceIPv4(iface); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m *Module) enrichHits(ctx context.Context, api searchAPI, hits []apibayHit, limit int) []apibayHit {

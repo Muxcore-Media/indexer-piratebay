@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"regexp"
@@ -14,6 +15,22 @@ import (
 	indexerv1 "github.com/Muxcore-Media/contracts-indexer/muxcore/indexer/v1"
 	"github.com/Muxcore-Media/core/sdk/go/client"
 )
+
+type storageWriter interface {
+	Put(ctx context.Context, key string, r io.Reader) error
+}
+
+func (m *Module) meshStorage() storageWriter {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.storageOverride != nil {
+		return m.storageOverride
+	}
+	if m.mc != nil && m.mc.Storage != nil {
+		return m.mc.Storage
+	}
+	return nil
+}
 
 // torrentIndexEntry is stored under torrent/{infohash}/index.json so any
 // StorageService backend (local, S3, …) can resolve search metadata by hash.
@@ -66,10 +83,8 @@ func (m *Module) dialCore(ctx context.Context) {
 }
 
 func (m *Module) cacheHitsInStorage(ctx context.Context, results []*indexerv1.SearchResult) {
-	m.mu.RLock()
-	mc := m.mc
-	m.mu.RUnlock()
-	if mc == nil || len(results) == 0 {
+	stor := m.meshStorage()
+	if stor == nil || len(results) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -95,7 +110,7 @@ func (m *Module) cacheHitsInStorage(ctx context.Context, results []*indexerv1.Se
 			continue
 		}
 		key := fmt.Sprintf("torrent/%s/index.json", ih)
-		if err := mc.Storage.Put(ctx, key, bytes.NewReader(data)); err != nil {
+		if err := stor.Put(ctx, key, bytes.NewReader(data)); err != nil {
 			slog.Debug("indexer-piratebay: cache index", "key", key, "error", err)
 		}
 	}

@@ -45,7 +45,7 @@ func TestApibayClientEmptyBaseNoNetwork(t *testing.T) {
 		t.Fatal("HTTP must not be called when base URL is empty")
 		return nil, nil
 	})}
-	c := newApibayClient("", hc)
+	c := newApibayClient("", hc, "test")
 	hits, err := c.Search(context.Background(), "Fight Club", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -73,12 +73,15 @@ func TestApibayClientHTTPtest(t *testing.T) {
 		if r.URL.Query().Get("cat") != "201" {
 			t.Errorf("cat: %s", r.URL.Query().Get("cat"))
 		}
+		if ua := r.Header.Get("User-Agent"); ua != "muxcore-indexer-piratebay/test" {
+			t.Errorf("User-Agent: %q", ua)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
 
-	c := newApibayClient(srv.URL, srv.Client())
+	c := newApibayClient(srv.URL, srv.Client(), "test")
 	c.minInterval = 0
 	hits, err := c.Search(context.Background(), "Fight Club", 201)
 	if err != nil {
@@ -99,7 +102,7 @@ func TestApibay429Cooldown(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := newApibayClient(srv.URL, srv.Client())
+	c := newApibayClient(srv.URL, srv.Client(), "test")
 	c.minInterval = 0
 	c.maxRetries = 0
 	c.cacheTTL = 0
@@ -129,7 +132,7 @@ func TestApibaySearchCache(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := newApibayClient(srv.URL, srv.Client())
+	c := newApibayClient(srv.URL, srv.Client(), "test")
 	c.minInterval = 0
 	ctx := context.Background()
 	if _, err := c.Search(ctx, "Fight Club", 201); err != nil {
@@ -467,5 +470,98 @@ func TestSearchEnrichDetailsOn(t *testing.T) {
 	}
 	if resp.Results[1].Seeders != 15 {
 		t.Errorf("second hit should stay unenriched seeders=%d", resp.Results[1].Seeders)
+	}
+}
+
+func TestSearchTotalBeforePaging(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "search_sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	m := NewModule(Config{
+		GRPCAddr: ":0",
+		BaseURL:  srv.URL,
+		HTTP:     srv.Client(),
+	})
+	ctx := context.Background()
+	if err := m.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Stop(ctx) })
+
+	resp, err := m.Search(ctx, &indexerv1.SearchRequest{
+		Query:  "Fight Club",
+		Type:   "movie",
+		Offset: 1,
+		Limit:  1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Results) != 1 {
+		t.Fatalf("results=%d want 1", len(resp.Results))
+	}
+	if resp.Total != 2 {
+		t.Fatalf("Total=%d want 2 (unpaged hit count)", resp.Total)
+	}
+}
+
+func TestSearchTVQueryTokens(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "search_sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		req     *indexerv1.SearchRequest
+		wantSub string
+	}{
+		{
+			name:    "season pack",
+			req:     &indexerv1.SearchRequest{Query: "Breaking Bad", Type: "tv", Season: 2},
+			wantSub: "S02",
+		},
+		{
+			name:    "episode",
+			req:     &indexerv1.SearchRequest{Query: "Breaking Bad", Type: "tv", Season: 1, Episode: 3},
+			wantSub: "S01E03",
+		},
+		{
+			name:    "absolute",
+			req:     &indexerv1.SearchRequest{Query: "One Piece", Type: "tv", Absolute: 1000},
+			wantSub: "1000",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.Query().Get("q")
+				_, _ = w.Write(body)
+			}))
+			t.Cleanup(srv.Close)
+
+			m := NewModule(Config{
+				GRPCAddr: ":0",
+				BaseURL:  srv.URL,
+				HTTP:     srv.Client(),
+			})
+			ctx := context.Background()
+			if err := m.Init(ctx); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = m.Stop(ctx) })
+			if _, err := m.Search(ctx, tc.req); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(gotQuery, tc.wantSub) {
+				t.Fatalf("query=%q want substring %q", gotQuery, tc.wantSub)
+			}
+		})
 	}
 }
