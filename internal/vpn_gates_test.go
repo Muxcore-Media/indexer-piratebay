@@ -71,6 +71,7 @@ func TestHTTPtestInjectSkipsVPNGate(t *testing.T) {
 }
 
 func TestFixtureModeOfflineSearchAndCaps(t *testing.T) {
+	t.Setenv("MUXCORE_DEV_TLS_SKIP", "true") // plaintext gRPC listener for this test (meshtls dev flag)
 	t.Setenv("WG_CONF", "")
 	t.Setenv("PIRATEBAY_API_BASE", "https://should-not-be-used.example")
 	m := NewModule(Config{GRPCAddr: ":0", Fixture: true})

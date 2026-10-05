@@ -19,6 +19,7 @@ import (
 	indexerv1 "github.com/Muxcore-Media/contracts-indexer/muxcore/indexer/v1"
 	"github.com/Muxcore-Media/core/pkg/contracts"
 	"github.com/Muxcore-Media/core/sdk/go/client"
+	"github.com/Muxcore-Media/core/sdk/go/module/meshtls"
 )
 
 type Module struct {
@@ -220,7 +221,11 @@ func (m *Module) Init(ctx context.Context) error {
 }
 
 func (m *Module) Start(ctx context.Context) error {
-	m.grpcSrv = grpc.NewServer()
+	srv, err := meshtls.NewServer()
+	if err != nil {
+		return fmt.Errorf("gRPC mesh TLS: %w", err)
+	}
+	m.grpcSrv = srv
 	indexerv1.RegisterIndexerServiceServer(m.grpcSrv, m)
 	m.registerSettingsMesh(m.grpcSrv)
 	go func() {

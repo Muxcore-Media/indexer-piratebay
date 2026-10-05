@@ -1,7 +1,7 @@
 {
   "name": "Pirate Bay Indexer",
   "description": "Single-site indexer module for The Pirate Bay via an Apibay-compatible JSON API.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "author": "MuxCore",
   "roles": [
     "indexer"

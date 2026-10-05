@@ -236,6 +236,7 @@ func TestSearchUnconfigured(t *testing.T) {
 }
 
 func TestSearchViaHTTPtest(t *testing.T) {
+	t.Setenv("MUXCORE_DEV_TLS_SKIP", "true") // plaintext gRPC listener for this test (meshtls dev flag)
 	body, err := os.ReadFile(filepath.Join("testdata", "search_sample.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -369,6 +370,7 @@ func TestMergeDetail(t *testing.T) {
 }
 
 func TestSearchEnrichDetailsOffByDefault(t *testing.T) {
+	t.Setenv("MUXCORE_DEV_TLS_SKIP", "true") // plaintext gRPC listener for this test (meshtls dev flag)
 	searchBody, err := os.ReadFile(filepath.Join("testdata", "search_sample.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -414,6 +416,7 @@ func TestSearchEnrichDetailsOffByDefault(t *testing.T) {
 }
 
 func TestSearchEnrichDetailsOn(t *testing.T) {
+	t.Setenv("MUXCORE_DEV_TLS_SKIP", "true") // plaintext gRPC listener for this test (meshtls dev flag)
 	searchBody, err := os.ReadFile(filepath.Join("testdata", "search_sample.json"))
 	if err != nil {
 		t.Fatal(err)
