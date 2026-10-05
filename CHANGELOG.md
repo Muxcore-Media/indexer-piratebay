@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.6] - 2026-10-05
+
+
+### Fixed
+- Fixture mode (`INDEXER_FIXTURE=1`) marks results (`IndexerName` "The Pirate Bay (fixture)", GUID prefixed `fixture-`) so media-automation's fixture-only dispatch guard (ADR-0008) accepts grabs. Live-mode output is unchanged.
+
 ## [0.1.5] - 2026-10-05
 
 ### Changed

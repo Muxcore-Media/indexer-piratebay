@@ -331,6 +331,9 @@ func (m *Module) Search(ctx context.Context, req *indexerv1.SearchRequest) (*ind
 		page = m.enrichHits(ctx, api, page, enrichLimit)
 	}
 	results := mapHits(page, base)
+	if fixture {
+		markFixtureResults(results)
+	}
 	go m.cacheHitsInStorage(context.WithoutCancel(ctx), results)
 	return &indexerv1.SearchResponse{
 		Results: results,

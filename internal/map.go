@@ -203,6 +203,27 @@ func pageHits(hits []apibayHit, offset, limit int) []apibayHit {
 	return hits
 }
 
+// fixtureMarker is the token media-automation's dispatch guard looks for
+// (fixtureIndexerGrab in media-automation/internal/dispatch_guard.go) in the
+// indexer name, GUID or download URL before allowing a grab while the
+// downloader is in fixture mode (ADR-0008).
+const fixtureMarker = "fixture"
+
+// markFixtureResults tags fixture-mode results so the dispatch guard accepts
+// them. The indexer name and GUID are both marked (belt and braces); the
+// magnet is left untouched so the btih stays valid. Live mode never calls this.
+func markFixtureResults(results []*indexerv1.SearchResult) {
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		r.IndexerName = indexerName + " (" + fixtureMarker + ")"
+		if !strings.HasPrefix(r.Guid, fixtureMarker+"-") {
+			r.Guid = fixtureMarker + "-" + r.Guid
+		}
+	}
+}
+
 func mapHits(hits []apibayHit, apiBase string) []*indexerv1.SearchResult {
 	out := make([]*indexerv1.SearchResult, 0, len(hits))
 	for _, h := range hits {
