@@ -122,7 +122,7 @@ func NewModule(cfg Config) *Module {
 		// If bind fails (iface down), leave hc nil — Init/Search surface the error; no clearnet fallback.
 	}
 	if hc == nil {
-		hc = &http.Client{Timeout: cfg.Timeout}
+		hc = newGuardedClient(cfg.Timeout)
 	}
 
 	version := strings.TrimSpace(cfg.Version)

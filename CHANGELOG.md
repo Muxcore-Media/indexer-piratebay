@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+- Apibay requests go through netguard Integration (private LAN and loopback allowed; link-local, cloud metadata, and non-HTTP schemes refused). The VPN-bound transport keeps its dialer and is checked before the request (NFR-SEC-009).
+
 ## [0.1.9] - 2026-10-05
 
 

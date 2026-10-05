@@ -147,7 +147,7 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 func newApibayClient(baseURL string, hc *http.Client, version string) *apibayClient {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if hc == nil && baseURL == "" {
-		hc = &http.Client{Timeout: 20 * time.Second}
+		hc = newGuardedClient(20 * time.Second)
 	}
 	if version == "" {
 		version = moduleVersion()
@@ -335,7 +335,7 @@ func (c *apibayClient) getJSON(ctx context.Context, rawURL, op string) ([]byte, 
 		}
 
 		c.markCall()
-		resp, err := c.http.Do(req)
+		resp, err := doGuarded(c.http, req)
 		if err != nil {
 			lastErr = fmt.Errorf("%s: %w", op, err)
 			if attempt == c.maxRetries {
