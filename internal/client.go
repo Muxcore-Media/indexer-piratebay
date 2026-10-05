@@ -150,7 +150,7 @@ func newApibayClient(baseURL string, hc *http.Client, version string) *apibayCli
 		hc = &http.Client{Timeout: 20 * time.Second}
 	}
 	if version == "" {
-		version = Version
+		version = moduleVersion()
 	}
 	return &apibayClient{
 		baseURL:     baseURL,

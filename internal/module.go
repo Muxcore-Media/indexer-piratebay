@@ -126,7 +126,7 @@ func NewModule(cfg Config) *Module {
 
 	version := strings.TrimSpace(cfg.Version)
 	if version == "" {
-		version = Version
+		version = moduleVersion()
 	}
 
 	m := &Module{
@@ -166,7 +166,7 @@ func envTruthy(v string) bool {
 func (m *Module) Info() contracts.ModuleInfo {
 	ver := m.version
 	if ver == "" {
-		ver = Version
+		ver = moduleVersion()
 	}
 	return contracts.ModuleInfo{
 		ID:           m.id,

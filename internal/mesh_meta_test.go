@@ -110,8 +110,6 @@ func TestParseInfoHashFromDownloadURL(t *testing.T) {
 }
 
 func TestModuleInfoUsesVersion(t *testing.T) {
-	Version = "0.9.8"
-	t.Cleanup(func() { Version = "0.1.1" })
 	m := NewModule(Config{Version: "1.2.3"})
 	info := m.Info()
 	if info.Version != "1.2.3" {
@@ -134,7 +132,6 @@ func TestApibayClientUserAgentDefaultVersion(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	Version = "9.9.9"
-	t.Cleanup(func() { Version = "0.1.1" })
 	c := newApibayClient(srv.URL, srv.Client(), "")
 	c.minInterval = 0
 	if _, err := c.Search(context.Background(), "x", 0); err != nil {
